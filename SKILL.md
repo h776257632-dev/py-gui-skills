@@ -375,6 +375,331 @@ if __name__ == "__main__":
 
 ---
 
+## Theme Switching & Style Management
+
+Modern applications must support dynamic theme switching. Implement a centralized theme manager for consistency.
+
+### Theme Manager Pattern
+
+```python
+"""Universal Theme Manager - Works with any framework"""
+import json
+import os
+from enum import Enum
+from typing import Callable, List
+
+class ThemeMode(Enum):
+    LIGHT = "light"
+    DARK = "dark"
+    SYSTEM = "system"
+
+class ThemeManager:
+    _instance = None
+    _listeners: List[Callable] = []
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._current_mode = ThemeMode.DARK
+            cls._instance._load_preference()
+        return cls._instance
+    
+    @property
+    def current_mode(self) -> ThemeMode:
+        return self._current_mode
+    
+    @property
+    def is_dark(self) -> bool:
+        if self._current_mode == ThemeMode.SYSTEM:
+            return self._detect_system_theme() == "dark"
+        return self._current_mode == ThemeMode.DARK
+    
+    def set_mode(self, mode: ThemeMode):
+        self._current_mode = mode
+        self._save_preference()
+        self._notify_listeners()
+    
+    def toggle(self):
+        """Toggle between light and dark mode."""
+        new_mode = ThemeMode.LIGHT if self.is_dark else ThemeMode.DARK
+        self.set_mode(new_mode)
+    
+    def add_listener(self, callback: Callable):
+        self._listeners.append(callback)
+    
+    def _notify_listeners(self):
+        for listener in self._listeners:
+            listener(self.is_dark)
+    
+    def _detect_system_theme(self) -> str:
+        """Detect OS theme preference."""
+        try:
+            import darkdetect
+            return darkdetect.theme().lower()
+        except ImportError:
+            # Fallback: Windows registry check
+            if os.name == 'nt':
+                import winreg
+                try:
+                    key = winreg.OpenKey(
+                        winreg.HKEY_CURRENT_USER,
+                        r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize"
+                    )
+                    value, _ = winreg.QueryValueEx(key, "AppsUseLightTheme")
+                    return "light" if value else "dark"
+                except:
+                    pass
+            return "dark"
+    
+    def _get_config_path(self) -> str:
+        config_dir = os.path.join(os.path.expanduser("~"), ".myapp")
+        os.makedirs(config_dir, exist_ok=True)
+        return os.path.join(config_dir, "theme.json")
+    
+    def _save_preference(self):
+        with open(self._get_config_path(), 'w') as f:
+            json.dump({"mode": self._current_mode.value}, f)
+    
+    def _load_preference(self):
+        try:
+            with open(self._get_config_path(), 'r') as f:
+                data = json.load(f)
+                self._current_mode = ThemeMode(data.get("mode", "dark"))
+        except (FileNotFoundError, json.JSONDecodeError):
+            pass
+```
+
+### PySide6 Dynamic Theme Switching
+
+```python
+"""PySide6 Theme Implementation"""
+from PySide6.QtWidgets import QApplication, QMainWindow, QPushButton
+from PySide6.QtCore import Signal, QObject
+
+class ThemeStyles:
+    DARK = """
+        QMainWindow { background-color: #0f0f0f; }
+        QWidget { background-color: #1a1a1a; color: #ffffff; }
+        QPushButton {
+            background-color: #2d2d2d;
+            color: #ffffff;
+            border: 1px solid #3d3d3d;
+            border-radius: 8px;
+            padding: 8px 16px;
+        }
+        QPushButton:hover { background-color: #3d3d3d; }
+        QLineEdit {
+            background-color: #2d2d2d;
+            border: 1px solid #3d3d3d;
+            border-radius: 6px;
+            padding: 8px;
+            color: #ffffff;
+        }
+    """
+    
+    LIGHT = """
+        QMainWindow { background-color: #f5f5f5; }
+        QWidget { background-color: #ffffff; color: #1a1a1a; }
+        QPushButton {
+            background-color: #e8e8e8;
+            color: #1a1a1a;
+            border: 1px solid #d0d0d0;
+            border-radius: 8px;
+            padding: 8px 16px;
+        }
+        QPushButton:hover { background-color: #d8d8d8; }
+        QLineEdit {
+            background-color: #ffffff;
+            border: 1px solid #d0d0d0;
+            border-radius: 6px;
+            padding: 8px;
+            color: #1a1a1a;
+        }
+    """
+
+class QtThemeManager(QObject):
+    theme_changed = Signal(bool)  # Emits True for dark mode
+    
+    def __init__(self, app: QApplication):
+        super().__init__()
+        self.app = app
+        self.theme_manager = ThemeManager()
+        self.theme_manager.add_listener(self._on_theme_change)
+        self.apply_theme()
+    
+    def apply_theme(self):
+        style = ThemeStyles.DARK if self.theme_manager.is_dark else ThemeStyles.LIGHT
+        self.app.setStyleSheet(style)
+    
+    def toggle(self):
+        self.theme_manager.toggle()
+    
+    def _on_theme_change(self, is_dark: bool):
+        self.apply_theme()
+        self.theme_changed.emit(is_dark)
+
+# Usage in MainWindow
+class MainWindow(QMainWindow):
+    def __init__(self, theme_mgr: QtThemeManager):
+        super().__init__()
+        self.theme_mgr = theme_mgr
+        self.theme_mgr.theme_changed.connect(self._on_theme_changed)
+        
+        # Theme toggle button
+        self.theme_btn = QPushButton("🌓 Toggle Theme")
+        self.theme_btn.clicked.connect(self.theme_mgr.toggle)
+    
+    def _on_theme_changed(self, is_dark: bool):
+        # Update any theme-specific icons or assets
+        icon = "moon.svg" if is_dark else "sun.svg"
+        # self.theme_btn.setIcon(QIcon(get_resource(f"assets/{icon}")))
+```
+
+### CustomTkinter Theme Switching
+
+```python
+"""CustomTkinter Theme Implementation"""
+import customtkinter as ctk
+
+class CTkThemeManager:
+    def __init__(self, root: ctk.CTk):
+        self.root = root
+        self.theme_manager = ThemeManager()
+        self.theme_manager.add_listener(self._on_theme_change)
+        self.apply_theme()
+    
+    def apply_theme(self):
+        mode = "dark" if self.theme_manager.is_dark else "light"
+        ctk.set_appearance_mode(mode)
+    
+    def toggle(self):
+        self.theme_manager.toggle()
+    
+    def _on_theme_change(self, is_dark: bool):
+        self.apply_theme()
+
+# Usage
+class App(ctk.CTk):
+    def __init__(self):
+        super().__init__()
+        self.theme_mgr = CTkThemeManager(self)
+        
+        # Theme toggle button with icon
+        self.theme_btn = ctk.CTkButton(
+            self,
+            text="🌓",
+            width=40,
+            command=self.theme_mgr.toggle
+        )
+        self.theme_btn.pack(anchor="ne", padx=10, pady=10)
+```
+
+### Flet Theme Switching
+
+```python
+"""Flet Theme Implementation"""
+import flet as ft
+
+def main(page: ft.Page):
+    theme_manager = ThemeManager()
+    
+    def apply_theme():
+        page.theme_mode = ft.ThemeMode.DARK if theme_manager.is_dark else ft.ThemeMode.LIGHT
+        page.update()
+    
+    def toggle_theme(e):
+        theme_manager.toggle()
+        apply_theme()
+    
+    # Theme toggle button
+    theme_button = ft.IconButton(
+        icon=ft.icons.DARK_MODE if theme_manager.is_dark else ft.icons.LIGHT_MODE,
+        on_click=toggle_theme,
+        tooltip="Toggle theme"
+    )
+    
+    page.appbar = ft.AppBar(
+        title=ft.Text("My App"),
+        actions=[theme_button]
+    )
+    
+    apply_theme()
+
+ft.app(target=main)
+```
+
+### System Theme Auto-Follow (Optional)
+
+```python
+"""Auto-follow system theme changes (requires darkdetect)"""
+# pip install darkdetect
+
+import darkdetect
+import threading
+
+def start_system_theme_listener(callback):
+    """Listen for OS theme changes in background."""
+    def listener():
+        darkdetect.listener(callback)
+    
+    thread = threading.Thread(target=listener, daemon=True)
+    thread.start()
+
+# Usage with ThemeManager
+theme_manager = ThemeManager()
+theme_manager.set_mode(ThemeMode.SYSTEM)
+
+def on_system_theme_change(new_theme):
+    # Refresh UI when system theme changes
+    theme_manager._notify_listeners()
+
+start_system_theme_listener(on_system_theme_change)
+```
+
+### Theme-Aware Color Palette
+
+```python
+"""Semantic color system that adapts to theme"""
+
+class Colors:
+    @staticmethod
+    def get(is_dark: bool) -> dict:
+        if is_dark:
+            return {
+                "bg_primary": "#0f0f0f",
+                "bg_secondary": "#1a1a1a",
+                "bg_tertiary": "#2d2d2d",
+                "text_primary": "#ffffff",
+                "text_secondary": "#a0a0a0",
+                "accent": "#6366f1",
+                "accent_hover": "#818cf8",
+                "border": "#3d3d3d",
+                "success": "#22c55e",
+                "warning": "#f59e0b",
+                "error": "#ef4444",
+            }
+        else:
+            return {
+                "bg_primary": "#ffffff",
+                "bg_secondary": "#f5f5f5",
+                "bg_tertiary": "#e8e8e8",
+                "text_primary": "#1a1a1a",
+                "text_secondary": "#6b7280",
+                "accent": "#4f46e5",
+                "accent_hover": "#6366f1",
+                "border": "#d0d0d0",
+                "success": "#16a34a",
+                "warning": "#d97706",
+                "error": "#dc2626",
+            }
+
+# Usage
+colors = Colors.get(theme_manager.is_dark)
+button_style = f"background-color: {colors['accent']};"
+```
+
+---
+
 ## Common UI Components
 
 ### Modern Card Component (PySide6)
@@ -437,4 +762,7 @@ class AnimatedButton(ctk.CTkButton):
 ✓ Dark Mode Default
 ✓ Grid/Pack Layout Only
 ✓ Production Build Config
+✓ Theme Manager (Light/Dark/System)
+✓ Theme Preference Persistence
+✓ Semantic Color Palette
 ```
